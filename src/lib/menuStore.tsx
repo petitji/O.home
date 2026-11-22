@@ -322,7 +322,7 @@ export function buildMenu(
     .filter(g => canSee(g.vis))
     .map((g): MenuItem | null => {
       if (g.href) {
-        return menuLabelFor(g.href, extra) === null ? null : { label: g.label, href: g.href };
+        return menuLabelFor(g.href, extra) === null ? null : { label: g.label, href: g.href, gid: g.id };
       }
       const children = g.items
         .filter(it => canSee(it.vis))
@@ -331,7 +331,7 @@ export function buildMenu(
           return def === null ? null : { href: it.href, label: it.label ?? def };
         })
         .filter((c): c is { href: string; label: string } => !!c);
-      return { label: g.label, children };
+      return { label: g.label, children, gid: g.id };
     })
     .filter((m): m is MenuItem => !!m);
 

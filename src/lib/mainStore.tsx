@@ -89,6 +89,8 @@ const DEFAULT_STATE: MainState = {
 };
 
 const STORAGE_KEY = 'ohome.main.v1';
+/** 편집모드 종료 신호 — detail.save: 저장 후 종료면 true, 저장하지 않고 종료면 false */
+export const EDIT_END_EVENT = 'ohome-edit-end';
 /** 편집모드를 지원하는 페이지 (v1.9 — 카드 그리드 드래그 정렬 포함)
  *  /trpg 로그 백업이 빠져 있던 것은 실수 — 드래그 정렬·목록 숨김 확인 모두 이 토글이 있어야 켜진다
  *  (v2.0 사용자 발견 — 목록 숨김 기능을 만들다 보니 편집모드 자체가 이 페이지에서 켜지지 않는 걸 발견) */
@@ -178,6 +180,8 @@ export function MainStoreProvider({ children }: { children: React.ReactNode }) {
   }, [pathname, state]);
 
   const endEdit = useCallback((save: boolean) => {
+    // 상단바에서 고친 메뉴 이름 등 — 다른 곳의 편집 초안도 같은 SAVE/되돌리기를 따르게 알린다
+    window.dispatchEvent(new CustomEvent(EDIT_END_EVENT, { detail: { save } }));
     if (save) persist(state);
     // 되돌릴 때도 저장 — 편집 중 위젯 설정 모달이 즉시 저장한 값까지 스냅샷으로 원복 (v1.9)
     else if (snapshot.current) { setState(snapshot.current); persist(snapshot.current); }
@@ -282,7 +286,7 @@ export function MainStoreProvider({ children }: { children: React.ReactNode }) {
       <ConfirmModal
         open={exitOpen}
         title="편집을 종료하시겠습니까?"
-        body="저장하지 않고 종료하면 이번 편집에서 바꾼 배치·크기·순서가 편집 시작 시점으로 복원됩니다."
+        body="저장하지 않고 종료하면 이번 편집에서 바꾼 배치·크기·순서·메뉴 이름이 편집 시작 시점으로 복원됩니다."
         onClose={() => { pendingNav.current = null; setExitOpen(false); }}
         buttons={[
           { label: '저장 후 종료', kind: 'dark', onClick: () => endEdit(true) },

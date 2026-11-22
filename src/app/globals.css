@@ -98,6 +98,22 @@ a{color:inherit;text-decoration:none}
 /* 상위 메뉴 무제한 (v1.9) — 바를 넘치는 항목은 ⋯ 드롭다운으로 (priority+) */
 .grp.more>button::after{content:""}
 .grp .sub{max-height:72vh;overflow:auto}
+/* 편집모드 메뉴 이름 편집 (v2.0) — 상단바·드롭다운에서 이름을 바로 고친다. 입력 중엔 드롭다운이 닫히지 않게 */
+.grp:focus-within .sub{display:block}
+.gnb-ed-wrap{display:inline-flex;align-items:center;gap:3px;padding:3px 6px;font-size:calc(8px*var(--fs,1));color:#7a808a;white-space:nowrap}
+.gnb-ed{
+  field-sizing:content;min-width:2.5em;max-width:14em;padding:4px 8px;border-radius:7px;
+  border:1px dashed color-mix(in srgb,currentColor 45%,transparent);background:rgba(255,255,255,.06);
+  font:inherit;font-size:calc(12.5px*var(--fs,1));font-family:var(--font-menu,var(--sans));font-weight:var(--fw-menu,400);
+  color:var(--top-fg);letter-spacing:.02em;outline:none;
+}
+.gnb-ed:focus{border-style:solid;border-color:var(--accent)}
+.gnb-ed::placeholder{color:inherit;opacity:.45}
+.grp .sub .sub-ed{padding:3px 4px}
+.grp .sub .sub-ed .gnb-ed{
+  display:block;width:100%;max-width:none;color:var(--dd-fg);background:transparent;
+  font-size:calc(12px*var(--fs,1));font-family:var(--font-dropdown,var(--sans));font-weight:var(--fw-dropdown,400);
+}
 /* 호버 다리 — .sub에 overflow가 생기며 .sub::before(-8px 다리)가 잘리므로 .grp 쪽에 상시 다리 (v1.9) */
 .grp::after{content:"";position:absolute;left:0;top:100%;width:100%;height:9px}
 .grp .sub .sub-cap{padding:8px 12px 3px;font-size:calc(9.5px*var(--fs,1));color:color-mix(in srgb,var(--dd-fg) 55%,transparent);letter-spacing:.14em;font-weight:700}

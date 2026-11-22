@@ -4,13 +4,14 @@
 // 편집모드 중 페이지 이동 시도 → 종료 확인 모달 (v1.8)
 import React, { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { boardEntries, useMenuSettings, buildMenu } from '@/lib/menuStore';
+import { boardEntries, useMenuSettings, buildMenu, defaultTree, menuLabelFor } from '@/lib/menuStore';
+import type { MenuItem } from '@/lib/menu';
 import { useBoards } from '@/lib/boardStore';
 import { useSections, sectionMenuEntries } from '@/lib/sectionStore';
 import { useCustomLinks, linkEntries } from '@/lib/linkStore';
 import { useSiteSettings } from '@/lib/siteStore';
 import { useAuth } from '@/lib/auth';
-import { useMainStore } from '@/lib/mainStore';
+import { useMainStore, EDIT_END_EVENT } from '@/lib/mainStore';
 import { useBlobUrl } from '@/lib/blobStore';
 import { refreshPage } from '@/lib/pageRefresh';
 import { useToast } from '@/components/ui/Toast';
@@ -28,6 +29,22 @@ const BellIcon = () => (
   </svg>
 );
 
+/* 편집모드 메뉴 이름 초안 키 — 상위(또는 단독)는 g:<id>, 하위는 i:<상위 id>|<주소> */
+const gKey = (gid: string) => `g:${gid}`;
+const iKey = (gid: string, href: string) => `i:${gid}|${href}`;
+
+/** 편집모드에서 상단바 메뉴 이름을 바로 고치는 입력칸 (v2.0 사용자 요청) */
+function LabelInput({ value, placeholder, onChange }: {
+  value: string; placeholder?: string; onChange: (v: string) => void;
+}) {
+  return (
+    <input className="gnb-ed" value={value} placeholder={placeholder}
+      size={Math.max(2, (value || placeholder || '').length + 1)}
+      onChange={e => onChange(e.target.value)}
+      onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
+  );
+}
+
 export function TopBar() {
   const { user, isAdmin, logout } = useAuth();
   const { editOn, editAvailable, gridOn, setGridOn, toggleEdit, requestExit, guardNav } = useMainStore();
@@ -36,15 +53,68 @@ export function TopBar() {
   const toast = useToast();
   const [menuOpen, setMenuOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
-  const [menuSet, , menuLoaded] = useMenuSettings(); // 메뉴 관리 (5.2) — 노출·순서·이름
+  const [menuSet, patchMenu, menuLoaded] = useMenuSettings(); // 메뉴 관리 (5.2) — 노출·순서·이름
   const { boards, loaded: boardsLoaded } = useBoards(); // 다중 게시판 (5.2) — 게시판 그룹에 동적 반영
   const { map: secMap } = useSections();
   const { links } = useCustomLinks();                    // 커스텀 링크 (v2.0 사용자 요청)                 // 여러 개로 만든 섹션 (v2.0) — 갤러리·다이어리 등
   // 저장 설정 로드 전에는 메뉴·로고를 그리지 않음 — 새로고침 시 기본 구성이 깜빡이는 것 방지 (v1.9)
   const ready = menuLoaded && boardsLoaded;
-  const menu = ready
-    ? buildMenu(menuSet, [...boardEntries(boards), ...sectionMenuEntries(secMap), ...linkEntries(links)], { loggedIn: !!user, isAdmin })
+  const extraEntries = [...boardEntries(boards), ...sectionMenuEntries(secMap), ...linkEntries(links)];
+  const builtMenu = ready
+    ? buildMenu(menuSet, extraEntries, { loggedIn: !!user, isAdmin })
     : [];
+
+  /* 편집모드 메뉴 이름 편집 (v2.0 사용자 요청) — 상위·하위 이름을 상단바에서 바로 고친다.
+     고친 값은 초안으로만 들고 있다가 편집모드 「저장 후 종료」 때 메뉴 트리에 저장,
+     「저장하지 않고 종료」면 버린다 (위젯 배치와 같은 규칙). 하위 이름을 비우면 기본 이름으로 돌아간다. */
+  const nameEdit = editOn && isAdmin;
+  const [names, setNames] = useState<Record<string, string>>({});
+  const setName = (k: string, v: string) => setNames(n => ({ ...n, [k]: v }));
+  const menu: MenuItem[] = builtMenu.map(m => {
+    if (!m.gid) return m;
+    const gl = names[gKey(m.gid)];
+    return {
+      ...m,
+      label: gl !== undefined && gl.trim() ? gl : m.label,
+      ...(m.children ? {
+        children: m.children.map(c => {
+          const cl = names[iKey(m.gid!, c.href)];
+          return cl !== undefined && cl.trim() ? { ...c, label: cl } : c;
+        }),
+      } : {}),
+    };
+  });
+  const namesRef = useRef(names);
+  namesRef.current = names;
+  const treeRef = useRef(menuSet.tree);
+  treeRef.current = menuSet.tree;
+  useEffect(() => {
+    const onEnd = (e: Event) => {
+      const save = (e as CustomEvent<{ save: boolean }>).detail?.save;
+      const draft = namesRef.current;
+      if (save && Object.keys(draft).length) {
+        const tree = (treeRef.current ?? defaultTree()).map(g => {
+          const gl = draft[gKey(g.id)];
+          return {
+            ...g,
+            ...(gl !== undefined && gl.trim() ? { label: gl.trim() } : {}),
+            items: g.items.map(it => {
+              const cl = draft[iKey(g.id, it.href)];
+              if (cl === undefined) return it;
+              if (!cl.trim()) { const { label: _drop, ...rest } = it; void _drop; return rest; }
+              return { ...it, label: cl.trim() };
+            }),
+          };
+        });
+        patchMenu({ tree });
+      }
+      setNames({});
+    };
+    window.addEventListener(EDIT_END_EVENT, onEnd);
+    return () => window.removeEventListener(EDIT_END_EVENT, onEnd);
+  }, [patchMenu]);
+  /** 초안이 있으면 초안, 없으면 지금 보이는 이름 */
+  const draftOf = (k: string, shown: string) => names[k] ?? shown;
   const [site, , siteLoaded] = useSiteSettings();    // 로고 텍스트/서브/정렬 (5.2)
   const avatarSrc = useBlobUrl(user?.avatarUrl);     // 프로필 이미지 (마이페이지, v1.9)
   const userRef = useRef<HTMLDivElement>(null);
@@ -107,7 +177,7 @@ export function TopBar() {
   const gnbRef = useRef<HTMLElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
   const [visCount, setVisCount] = useState(menu.length);
-  const menuKey = menu.map(m => m.label).join('|');
+  const menuKey = menu.map(m => m.label).join('|') + (nameEdit ? '|ed' : '');
   useEffect(() => {
     const gnbEl = gnbRef.current, mEl = measureRef.current;
     if (!gnbEl || !mEl) return;
@@ -154,22 +224,40 @@ export function TopBar() {
       <nav className="gnb" ref={gnbRef}>
         {visMenu.map(item =>
           item.children ? (
-            <div className="grp" key={item.label}>
-              {/* 상위 클릭 → 첫 하위 페이지 (v1.8) · 안 읽은 알림이 있는 메뉴에 점 (4.13) */}
-              <button onClick={() => nav(item.children![0].href)}>
-                {item.label}{item.children.some(c => dotHrefs.has(c.href)) && <small className="nd">●</small>}
-              </button>
+            <div className="grp" key={item.gid ?? item.label}>
+              {nameEdit && item.gid ? (
+                <span className="gnb-ed-wrap">
+                  <LabelInput value={draftOf(gKey(item.gid), item.label)}
+                    onChange={v => setName(gKey(item.gid!), v)} /> ▾
+                </span>
+              ) : (
+                /* 상위 클릭 → 첫 하위 페이지 (v1.8) · 안 읽은 알림이 있는 메뉴에 점 (4.13) */
+                <button onClick={() => nav(item.children![0].href)}>
+                  {item.label}{item.children.some(c => dotHrefs.has(c.href)) && <small className="nd">●</small>}
+                </button>
+              )}
               <div className="sub">
-                {item.children.map(c => (
+                {item.children.map(c => nameEdit && item.gid ? (
+                  <div className="sub-ed" key={c.href}>
+                    <LabelInput value={draftOf(iKey(item.gid, c.href), c.label)}
+                      placeholder={menuLabelFor(c.href, extraEntries) ?? undefined}
+                      onChange={v => setName(iKey(item.gid!, c.href), v)} />
+                  </div>
+                ) : (
                   <button key={c.href} onClick={() => nav(c.href)}>
                     {c.label}{dotHrefs.has(c.href) && <small className="nd">●</small>}
                   </button>
                 ))}
               </div>
             </div>
+          ) : nameEdit && item.gid ? (
+            <span className="gnb-ed-wrap" key={item.gid}>
+              <LabelInput value={draftOf(gKey(item.gid), item.label)}
+                onChange={v => setName(gKey(item.gid!), v)} />
+            </span>
           ) : (
             <button
-              key={item.label}
+              key={item.gid ?? item.label}
               className={pathname === item.href ? 'on' : ''}
               onClick={() => nav(item.href!)}
             >
@@ -186,16 +274,32 @@ export function TopBar() {
             <div className="sub">
               {moreMenu.map(item =>
                 item.children ? (
-                  <div className="sub-grp" key={item.label}>
-                    <div className="sub-cap">{item.label}</div>
-                    {item.children.map(c => (
+                  <div className="sub-grp" key={item.gid ?? item.label}>
+                    {nameEdit && item.gid ? (
+                      <div className="sub-ed">
+                        <LabelInput value={draftOf(gKey(item.gid), item.label)}
+                          onChange={v => setName(gKey(item.gid!), v)} />
+                      </div>
+                    ) : <div className="sub-cap">{item.label}</div>}
+                    {item.children.map(c => nameEdit && item.gid ? (
+                      <div className="sub-ed" key={c.href}>
+                        <LabelInput value={draftOf(iKey(item.gid, c.href), c.label)}
+                          placeholder={menuLabelFor(c.href, extraEntries) ?? undefined}
+                          onChange={v => setName(iKey(item.gid!, c.href), v)} />
+                      </div>
+                    ) : (
                       <button key={c.href} onClick={() => nav(c.href)}>
                         {c.label}{dotHrefs.has(c.href) && <small className="nd">●</small>}
                       </button>
                     ))}
                   </div>
+                ) : nameEdit && item.gid ? (
+                  <div className="sub-ed" key={item.gid}>
+                    <LabelInput value={draftOf(gKey(item.gid), item.label)}
+                      onChange={v => setName(gKey(item.gid!), v)} />
+                  </div>
                 ) : (
-                  <button key={item.label} onClick={() => nav(item.href!)}>
+                  <button key={item.gid ?? item.label} onClick={() => nav(item.href!)}>
                     {item.label}{dotHrefs.has(item.href!) && <small className="nd">●</small>}
                   </button>
                 ))}
@@ -204,7 +308,7 @@ export function TopBar() {
         )}
         {/* 폭 측정용 사본 (보이지 않음) — 마지막 항목은 ⋯ 버튼 폭 */}
         <div className="gnb gnb-measure" ref={measureRef} aria-hidden>
-          {menu.map(item => <button key={item.label} tabIndex={-1}>{item.label}{item.children && <span> ▾</span>}</button>)}
+          {menu.map(item => <button key={item.gid ?? item.label} tabIndex={-1}>{item.label}{item.children && <span> ▾</span>}</button>)}
           <button tabIndex={-1}>⋯</button>
         </div>
       </nav>

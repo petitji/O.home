@@ -6,6 +6,8 @@ export interface MenuItem {
   label: string;
   href?: string;             // 하위가 없는 단독 메뉴
   children?: { label: string; href: string }[];
+  /** 메뉴 트리의 상위 id (buildMenu가 채움) — 편집모드에서 상단바 이름을 바로 고칠 때 어느 항목인지 찾는 데 쓴다 */
+  gid?: string;
 }
 
 /** 배치 가능한 기능(모듈) 전체 — href → 기본 이름. 메뉴 트리에 넣어야 노출됨 (3장 메뉴 선택제) */
